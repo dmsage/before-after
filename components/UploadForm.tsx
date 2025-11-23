@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, ChangeEvent } from 'react';
+import { useState, useRef, ChangeEvent, DragEvent } from 'react';
 import {
   Box,
   Button,
@@ -13,7 +13,7 @@ import {
   Stack,
 } from '@mui/material';
 import { CloudUpload, Check, Crop } from '@mui/icons-material';
-import { validateImageType, getAcceptedTypes, generateImageId, formatFileSize, compressImage } from '@/lib/imageUtils';
+import { validateImageType, getAcceptedTypes, generateImageId, formatFileSize, compressImage, isHeicFile, convertHeicToJpeg } from '@/lib/imageUtils';
 import { compressCroppedImage, blobToDataURL, CropArea } from '@/lib/cropUtils';
 import { saveImage } from '@/lib/storage';
 import { getTodayDate } from '@/lib/dateUtils';
@@ -38,33 +38,85 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [compressionInfo, setCompressionInfo] = useState<{ original: number; compressed: number } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isConverting, setIsConverting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const processFile = async (file: File) => {
     setError(null);
     setSuccess(false);
     setCompressionInfo(null);
 
-    if (!file) return;
-
     if (!validateImageType(file)) {
-      setError('Please select a valid image file (JPG, PNG, or WebP)');
+      setError('Please select a valid image file (JPG, PNG, WebP, or HEIC)');
       return;
     }
 
-    setSelectedFile(file);
+    let processedFile = file;
+
+    // Convert HEIC to JPEG if needed
+    if (isHeicFile(file)) {
+      setIsConverting(true);
+      try {
+        const jpegBlob = await convertHeicToJpeg(file);
+        // Create a new File from the blob
+        processedFile = new File([jpegBlob], file.name.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg'), {
+          type: 'image/jpeg',
+        });
+      } catch (err) {
+        setError('Failed to convert HEIC image. Please try a different format.');
+        setIsConverting(false);
+        return;
+      }
+      setIsConverting(false);
+    }
+
+    setSelectedFile(processedFile);
 
     const reader = new FileReader();
     reader.onload = (e) => {
       const imageData = e.target?.result as string;
       setOriginalImage(imageData);
-      // Don't auto-open cropper - just show preview
       setCroppedImage(null);
       setCroppedPreview(null);
       setCropSettings(null);
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(processedFile);
+  };
+
+  const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processFile(file);
+    }
+  };
+
+  const handleDragEnter = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processFile(file);
+    }
   };
 
   const handleOpenCropper = () => {
@@ -214,7 +266,27 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
 
           <MeasurementsInput value={measurements} onChange={setMeasurements} />
 
-          <Box>
+          <Box
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            sx={{
+              border: '2px dashed',
+              borderColor: isDragging ? 'primary.main' : 'divider',
+              borderRadius: 2,
+              p: 3,
+              textAlign: 'center',
+              bgcolor: isDragging ? 'action.hover' : 'transparent',
+              transition: 'all 0.2s ease',
+              cursor: 'pointer',
+              '&:hover': {
+                borderColor: 'primary.main',
+                bgcolor: 'action.hover',
+              },
+            }}
+            onClick={() => fileInputRef.current?.click()}
+          >
             <input
               type="file"
               accept={getAcceptedTypes()}
@@ -223,16 +295,24 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
               style={{ display: 'none' }}
               id="image-upload"
             />
-            <label htmlFor="image-upload">
-              <Button
-                component="span"
-                variant="outlined"
-                startIcon={<CloudUpload />}
-                fullWidth
-              >
-                Select Image
-              </Button>
-            </label>
+            {isConverting ? (
+              <>
+                <CircularProgress size={48} sx={{ mb: 1 }} />
+                <Typography variant="body1" color="primary.main">
+                  Converting HEIC image...
+                </Typography>
+              </>
+            ) : (
+              <>
+                <CloudUpload sx={{ fontSize: 48, color: isDragging ? 'primary.main' : 'text.secondary', mb: 1 }} />
+                <Typography variant="body1" color={isDragging ? 'primary.main' : 'text.secondary'}>
+                  {isDragging ? 'Drop image here' : 'Drag & drop an image here'}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  or click to select (JPG, PNG, WebP, HEIC)
+                </Typography>
+              </>
+            )}
           </Box>
 
           {originalImage && (

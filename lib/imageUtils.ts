@@ -1,13 +1,41 @@
-const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
 const MAX_FILE_SIZE = 500 * 1024; // 500KB target
 const MAX_DIMENSION = 1920; // Max width or height
 
 export function validateImageType(file: File): boolean {
-  return ACCEPTED_TYPES.includes(file.type);
+  // Check by MIME type
+  if (ACCEPTED_TYPES.includes(file.type)) {
+    return true;
+  }
+  // Also check by file extension for HEIC files (some browsers don't set MIME type)
+  const extension = file.name.toLowerCase().split('.').pop();
+  return extension === 'heic' || extension === 'heif';
 }
 
 export function getAcceptedTypes(): string {
-  return ACCEPTED_TYPES.join(',');
+  return ACCEPTED_TYPES.join(',') + ',.heic,.heif';
+}
+
+export function isHeicFile(file: File): boolean {
+  const extension = file.name.toLowerCase().split('.').pop();
+  return file.type === 'image/heic' || file.type === 'image/heif' || extension === 'heic' || extension === 'heif';
+}
+
+export async function convertHeicToJpeg(file: File): Promise<Blob> {
+  // Dynamically import heic2any to avoid SSR issues
+  const heic2any = (await import('heic2any')).default;
+
+  const result = await heic2any({
+    blob: file,
+    toType: 'image/jpeg',
+    quality: 0.9,
+  });
+
+  // heic2any can return a single blob or array of blobs
+  if (Array.isArray(result)) {
+    return result[0];
+  }
+  return result;
 }
 
 export async function compressImage(

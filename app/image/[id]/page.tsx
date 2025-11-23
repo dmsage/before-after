@@ -28,13 +28,15 @@ import {
   ZoomIn,
   ZoomOut,
   Close,
+  Edit,
 } from '@mui/icons-material';
-import { ProgressImage } from '@/types';
+import { ProgressImage, BodyMeasurements } from '@/types';
 import { getImage, deleteImage, saveImage } from '@/lib/storage';
 import { formatDate } from '@/lib/dateUtils';
 import { formatFileSize } from '@/lib/imageUtils';
 import { compressCroppedImage, CropArea } from '@/lib/cropUtils';
 import MeasurementsDisplay from '@/components/MeasurementsDisplay';
+import MeasurementsInput from '@/components/MeasurementsInput';
 import ImageCropper from '@/components/ImageCropper';
 
 export default function ImageDetailPage() {
@@ -48,6 +50,8 @@ export default function ImageDetailPage() {
   const [fullViewOpen, setFullViewOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [showCropper, setShowCropper] = useState(false);
+  const [editMeasurementsOpen, setEditMeasurementsOpen] = useState(false);
+  const [editingMeasurements, setEditingMeasurements] = useState<BodyMeasurements>({});
 
   useEffect(() => {
     loadImage();
@@ -116,6 +120,34 @@ export default function ImageDetailPage() {
   const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.5, 4));
   const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.5, 1));
   const handleResetZoom = () => setZoom(1);
+
+  const handleEditMeasurements = () => {
+    if (image) {
+      setEditingMeasurements(image.measurements || {});
+      setEditMeasurementsOpen(true);
+    }
+  };
+
+  const handleSaveMeasurements = async () => {
+    if (!image) return;
+
+    try {
+      const filteredMeasurements = Object.fromEntries(
+        Object.entries(editingMeasurements).filter(([, v]) => v !== undefined && v !== null)
+      ) as BodyMeasurements;
+
+      const updatedImage: ProgressImage = {
+        ...image,
+        measurements: Object.keys(filteredMeasurements).length > 0 ? filteredMeasurements : undefined,
+      };
+
+      await saveImage(updatedImage);
+      setImage(updatedImage);
+      setEditMeasurementsOpen(false);
+    } catch (error) {
+      console.error('Failed to save measurements:', error);
+    }
+  };
 
   if (loading) {
     return (
@@ -236,14 +268,27 @@ export default function ImageDetailPage() {
               )}
             </Stack>
 
-            {image.measurements && Object.keys(image.measurements).length > 0 && (
-              <Box>
-                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+            <Box>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                <Typography variant="subtitle2" fontWeight="bold">
                   Body Measurements
                 </Typography>
+                <Button
+                  size="small"
+                  startIcon={<Edit />}
+                  onClick={handleEditMeasurements}
+                >
+                  {image.measurements && Object.keys(image.measurements).length > 0 ? 'Edit' : 'Add'}
+                </Button>
+              </Stack>
+              {image.measurements && Object.keys(image.measurements).length > 0 ? (
                 <MeasurementsDisplay measurements={image.measurements} />
-              </Box>
-            )}
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  No measurements recorded
+                </Typography>
+              )}
+            </Box>
 
             <Typography variant="caption" color="text.secondary">
               Uploaded: {new Date(image.uploadTimestamp).toLocaleString()}
@@ -351,6 +396,30 @@ export default function ImageDetailPage() {
           onCancel={() => setShowCropper(false)}
         />
       )}
+
+      {/* Edit Measurements Dialog */}
+      <Dialog
+        open={editMeasurementsOpen}
+        onClose={() => setEditMeasurementsOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Edit Measurements</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 1 }}>
+            <MeasurementsInput
+              value={editingMeasurements}
+              onChange={setEditingMeasurements}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditMeasurementsOpen(false)}>Cancel</Button>
+          <Button onClick={handleSaveMeasurements} variant="contained">
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }
