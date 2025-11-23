@@ -18,9 +18,11 @@ import {
 } from '@mui/material';
 import { ArrowUpward, ArrowDownward } from '@mui/icons-material';
 import { ProgressImage, SortOrder } from '@/types';
-import { getAllImages, deleteImage } from '@/lib/storage';
+import { getAllImages, deleteImage, saveImage } from '@/lib/storage';
 import { sortByDate } from '@/lib/dateUtils';
+import { compressCroppedImage, CropArea } from '@/lib/cropUtils';
 import ImageCard from './ImageCard';
+import ImageCropper from './ImageCropper';
 
 interface ImageGalleryProps {
   onSelectForCompare?: (id: string) => void;
@@ -42,6 +44,7 @@ export default function ImageGallery({
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [imageToDelete, setImageToDelete] = useState<string | null>(null);
+  const [reCropImage, setReCropImage] = useState<ProgressImage | null>(null);
 
   useEffect(() => {
     loadImages();
@@ -86,6 +89,46 @@ export default function ImageGallery({
   const handleDeleteCancel = () => {
     setDeleteDialogOpen(false);
     setImageToDelete(null);
+  };
+
+  const handleReCrop = (image: ProgressImage) => {
+    setReCropImage(image);
+  };
+
+  const handleReCropComplete = async (croppedBlob: Blob, cropArea: CropArea) => {
+    if (!reCropImage) return;
+
+    try {
+      const { data, size } = await compressCroppedImage(croppedBlob);
+
+      const updatedImage: ProgressImage = {
+        ...reCropImage,
+        imageData: data,
+        fileSize: size,
+        cropSettings: {
+          x: cropArea.x,
+          y: cropArea.y,
+          width: cropArea.width,
+          height: cropArea.height,
+          zoom: 1,
+          aspectRatio: null,
+        },
+      };
+
+      await saveImage(updatedImage);
+      setImages((prev) =>
+        prev.map((img) => (img.id === updatedImage.id ? updatedImage : img))
+      );
+      onImagesChange?.();
+    } catch (error) {
+      console.error('Failed to re-crop image:', error);
+    } finally {
+      setReCropImage(null);
+    }
+  };
+
+  const handleReCropCancel = () => {
+    setReCropImage(null);
   };
 
   if (loading) {
@@ -143,6 +186,7 @@ export default function ImageGallery({
               image={image}
               onDelete={handleDeleteClick}
               onSelect={onSelectForCompare}
+              onReCrop={handleReCrop}
               selected={selectedIds.includes(image.id)}
               selectable={selectable}
             />
@@ -164,6 +208,14 @@ export default function ImageGallery({
           </Button>
         </DialogActions>
       </Dialog>
+
+      {reCropImage && reCropImage.originalImageData && (
+        <ImageCropper
+          imageSrc={reCropImage.originalImageData}
+          onCropComplete={handleReCropComplete}
+          onCancel={handleReCropCancel}
+        />
+      )}
     </Box>
   );
 }

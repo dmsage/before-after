@@ -9,14 +9,15 @@ import {
   Stack,
   useMediaQuery,
   useTheme,
+  Grid,
 } from '@mui/material';
 import { ZoomIn, ZoomOut, RestartAlt } from '@mui/icons-material';
 import { ProgressImage } from '@/types';
-import { formatDate, getDateDifference } from '@/lib/dateUtils';
+import { formatDate } from '@/lib/dateUtils';
+import { MeasurementsCompareMultiple } from './MeasurementsDisplay';
 
 interface ComparisonViewProps {
-  image1: ProgressImage | null;
-  image2: ProgressImage | null;
+  images: (ProgressImage | null)[];
 }
 
 interface ZoomState {
@@ -25,56 +26,73 @@ interface ZoomState {
   translateY: number;
 }
 
-export default function ComparisonView({ image1, image2 }: ComparisonViewProps) {
+export default function ComparisonView({ images }: ComparisonViewProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
-  const [zoom1, setZoom1] = useState<ZoomState>({ scale: 1, translateX: 0, translateY: 0 });
-  const [zoom2, setZoom2] = useState<ZoomState>({ scale: 1, translateX: 0, translateY: 0 });
+  const [zoomStates, setZoomStates] = useState<ZoomState[]>([
+    { scale: 1, translateX: 0, translateY: 0 },
+    { scale: 1, translateX: 0, translateY: 0 },
+    { scale: 1, translateX: 0, translateY: 0 },
+    { scale: 1, translateX: 0, translateY: 0 },
+  ]);
   const [isDragging, setIsDragging] = useState(false);
-  const [activeImage, setActiveImage] = useState<1 | 2 | null>(null);
+  const [activeImage, setActiveImage] = useState<number | null>(null);
   const dragStart = useRef({ x: 0, y: 0 });
 
-  const handleZoomIn = (imageNum: 1 | 2) => {
-    const setZoom = imageNum === 1 ? setZoom1 : setZoom2;
-    setZoom((prev) => ({ ...prev, scale: Math.min(prev.scale + 0.5, 4) }));
+  const handleZoomIn = (index: number) => {
+    setZoomStates(prev => {
+      const newStates = [...prev];
+      newStates[index] = { ...newStates[index], scale: Math.min(newStates[index].scale + 0.5, 4) };
+      return newStates;
+    });
   };
 
-  const handleZoomOut = (imageNum: 1 | 2) => {
-    const setZoom = imageNum === 1 ? setZoom1 : setZoom2;
-    setZoom((prev) => ({
-      scale: Math.max(prev.scale - 0.5, 1),
-      translateX: prev.scale <= 1.5 ? 0 : prev.translateX,
-      translateY: prev.scale <= 1.5 ? 0 : prev.translateY,
-    }));
+  const handleZoomOut = (index: number) => {
+    setZoomStates(prev => {
+      const newStates = [...prev];
+      const currentScale = newStates[index].scale;
+      newStates[index] = {
+        scale: Math.max(currentScale - 0.5, 1),
+        translateX: currentScale <= 1.5 ? 0 : newStates[index].translateX,
+        translateY: currentScale <= 1.5 ? 0 : newStates[index].translateY,
+      };
+      return newStates;
+    });
   };
 
-  const handleReset = (imageNum: 1 | 2) => {
-    const setZoom = imageNum === 1 ? setZoom1 : setZoom2;
-    setZoom({ scale: 1, translateX: 0, translateY: 0 });
+  const handleReset = (index: number) => {
+    setZoomStates(prev => {
+      const newStates = [...prev];
+      newStates[index] = { scale: 1, translateX: 0, translateY: 0 };
+      return newStates;
+    });
   };
 
-  const handleMouseDown = (e: MouseEvent, imageNum: 1 | 2) => {
-    const zoom = imageNum === 1 ? zoom1 : zoom2;
+  const handleMouseDown = (e: MouseEvent, index: number) => {
+    const zoom = zoomStates[index];
     if (zoom.scale > 1) {
       setIsDragging(true);
-      setActiveImage(imageNum);
+      setActiveImage(index);
       dragStart.current = { x: e.clientX, y: e.clientY };
     }
   };
 
   const handleMouseMove = (e: MouseEvent) => {
-    if (!isDragging || !activeImage) return;
+    if (!isDragging || activeImage === null) return;
 
-    const setZoom = activeImage === 1 ? setZoom1 : setZoom2;
     const dx = e.clientX - dragStart.current.x;
     const dy = e.clientY - dragStart.current.y;
 
-    setZoom((prev) => ({
-      ...prev,
-      translateX: prev.translateX + dx,
-      translateY: prev.translateY + dy,
-    }));
+    setZoomStates(prev => {
+      const newStates = [...prev];
+      newStates[activeImage] = {
+        ...newStates[activeImage],
+        translateX: newStates[activeImage].translateX + dx,
+        translateY: newStates[activeImage].translateY + dy,
+      };
+      return newStates;
+    });
 
     dragStart.current = { x: e.clientX, y: e.clientY };
   };
@@ -84,27 +102,30 @@ export default function ComparisonView({ image1, image2 }: ComparisonViewProps) 
     setActiveImage(null);
   };
 
-  const handleTouchStart = (e: TouchEvent, imageNum: 1 | 2) => {
-    const zoom = imageNum === 1 ? zoom1 : zoom2;
+  const handleTouchStart = (e: TouchEvent, index: number) => {
+    const zoom = zoomStates[index];
     if (zoom.scale > 1 && e.touches.length === 1) {
       setIsDragging(true);
-      setActiveImage(imageNum);
+      setActiveImage(index);
       dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     }
   };
 
   const handleTouchMove = (e: TouchEvent) => {
-    if (!isDragging || !activeImage || e.touches.length !== 1) return;
+    if (!isDragging || activeImage === null || e.touches.length !== 1) return;
 
-    const setZoom = activeImage === 1 ? setZoom1 : setZoom2;
     const dx = e.touches[0].clientX - dragStart.current.x;
     const dy = e.touches[0].clientY - dragStart.current.y;
 
-    setZoom((prev) => ({
-      ...prev,
-      translateX: prev.translateX + dx,
-      translateY: prev.translateY + dy,
-    }));
+    setZoomStates(prev => {
+      const newStates = [...prev];
+      newStates[activeImage] = {
+        ...newStates[activeImage],
+        translateX: newStates[activeImage].translateX + dx,
+        translateY: newStates[activeImage].translateY + dy,
+      };
+      return newStates;
+    });
 
     dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
   };
@@ -114,125 +135,136 @@ export default function ComparisonView({ image1, image2 }: ComparisonViewProps) 
     setActiveImage(null);
   };
 
-  if (!image1 && !image2) {
+  const activeImages = images.filter((img): img is ProgressImage => img !== null);
+
+  if (activeImages.length === 0) {
     return (
       <Box textAlign="center" py={8}>
         <Typography variant="h6" color="text.secondary">
-          Select two photos to compare
+          Select photos to compare (up to 4)
         </Typography>
       </Box>
     );
   }
 
-  const timeDiff = image1 && image2 ? getDateDifference(image1.date, image2.date) : null;
-
   const renderImagePanel = (
     image: ProgressImage | null,
-    zoom: ZoomState,
-    imageNum: 1 | 2,
-    label: string
-  ) => (
-    <Paper
-      elevation={2}
-      sx={{
-        flex: 1,
-        minHeight: isMobile ? 250 : 400,
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}
-    >
-      {image ? (
-        <>
-          <Box sx={{ p: 1, borderBottom: 1, borderColor: 'divider' }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Box>
-                <Typography variant="subtitle2" fontWeight="bold">
-                  {label}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {formatDate(image.date)}
-                </Typography>
-              </Box>
-              <Stack direction="row" spacing={0.5}>
-                <IconButton size="small" onClick={() => handleZoomOut(imageNum)} disabled={zoom.scale <= 1}>
-                  <ZoomOut fontSize="small" />
-                </IconButton>
-                <IconButton size="small" onClick={() => handleZoomIn(imageNum)} disabled={zoom.scale >= 4}>
-                  <ZoomIn fontSize="small" />
-                </IconButton>
-                <IconButton size="small" onClick={() => handleReset(imageNum)} disabled={zoom.scale === 1}>
-                  <RestartAlt fontSize="small" />
-                </IconButton>
+    index: number
+  ) => {
+    const zoom = zoomStates[index];
+
+    return (
+      <Paper
+        elevation={2}
+        sx={{
+          height: '100%',
+          minHeight: isMobile ? 200 : 300,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        {image ? (
+          <>
+            <Box sx={{ p: 1, borderBottom: 1, borderColor: 'divider' }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    {formatDate(image.date)}
+                  </Typography>
+                </Box>
+                <Stack direction="row" spacing={0.5}>
+                  <IconButton size="small" onClick={() => handleZoomOut(index)} disabled={zoom.scale <= 1}>
+                    <ZoomOut fontSize="small" />
+                  </IconButton>
+                  <IconButton size="small" onClick={() => handleZoomIn(index)} disabled={zoom.scale >= 4}>
+                    <ZoomIn fontSize="small" />
+                  </IconButton>
+                  <IconButton size="small" onClick={() => handleReset(index)} disabled={zoom.scale === 1}>
+                    <RestartAlt fontSize="small" />
+                  </IconButton>
+                </Stack>
               </Stack>
-            </Stack>
-          </Box>
+            </Box>
+            <Box
+              sx={{
+                flex: 1,
+                overflow: 'hidden',
+                cursor: zoom.scale > 1 ? 'grab' : 'default',
+                '&:active': {
+                  cursor: zoom.scale > 1 ? 'grabbing' : 'default',
+                },
+              }}
+              onMouseDown={(e) => handleMouseDown(e, index)}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              onTouchStart={(e) => handleTouchStart(e, index)}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+            >
+              <Box
+                component="img"
+                src={image.imageData}
+                alt={`Photo from ${image.date}`}
+                sx={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  transform: `scale(${zoom.scale}) translate(${zoom.translateX / zoom.scale}px, ${zoom.translateY / zoom.scale}px)`,
+                  transition: isDragging ? 'none' : 'transform 0.2s ease',
+                  userSelect: 'none',
+                  pointerEvents: 'none',
+                }}
+              />
+            </Box>
+          </>
+        ) : (
           <Box
             sx={{
               flex: 1,
-              overflow: 'hidden',
-              cursor: zoom.scale > 1 ? 'grab' : 'default',
-              '&:active': {
-                cursor: zoom.scale > 1 ? 'grabbing' : 'default',
-              },
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
-            onMouseDown={(e) => handleMouseDown(e, imageNum)}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            onTouchStart={(e) => handleTouchStart(e, imageNum)}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
           >
-            <Box
-              component="img"
-              src={image.imageData}
-              alt={`Photo from ${image.date}`}
-              sx={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'contain',
-                transform: `scale(${zoom.scale}) translate(${zoom.translateX / zoom.scale}px, ${zoom.translateY / zoom.scale}px)`,
-                transition: isDragging ? 'none' : 'transform 0.2s ease',
-                userSelect: 'none',
-                pointerEvents: 'none',
-              }}
-            />
+            <Typography color="text.secondary">Select a photo</Typography>
           </Box>
-        </>
-      ) : (
-        <Box
-          sx={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Typography color="text.secondary">Select a photo</Typography>
-        </Box>
-      )}
-    </Paper>
-  );
+        )}
+      </Paper>
+    );
+  };
+
+  // Determine grid layout based on number of images
+  const getGridSize = () => {
+    if (activeImages.length <= 2) {
+      return { xs: 12, sm: 6 };
+    }
+    return { xs: 6, sm: 6, md: 3 };
+  };
+
+  const gridSize = getGridSize();
 
   return (
     <Box>
-      {timeDiff && (
-        <Box textAlign="center" mb={2}>
-          <Typography variant="h6" color="primary">
-            {timeDiff.formatted}
-          </Typography>
-        </Box>
-      )}
+      <Grid container spacing={2}>
+        {images.map((image, index) => {
+          // Only show slots that have images or are needed for the layout
+          if (!image && index >= activeImages.length) return null;
 
-      <Stack
-        direction={isMobile ? 'column' : 'row'}
-        spacing={2}
-        sx={{ minHeight: isMobile ? 'auto' : 450 }}
-      >
-        {renderImagePanel(image1, zoom1, 1, 'Before')}
-        {renderImagePanel(image2, zoom2, 2, 'After')}
-      </Stack>
+          return (
+            <Grid key={index} size={gridSize}>
+              {renderImagePanel(image, index)}
+            </Grid>
+          );
+        })}
+      </Grid>
+
+      {activeImages.some(img => img.measurements) && (
+        <Paper elevation={1} sx={{ mt: 2, p: 2 }}>
+          <MeasurementsCompareMultiple images={activeImages} />
+        </Paper>
+      )}
     </Box>
   );
 }

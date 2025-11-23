@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import {
   Card,
   CardMedia,
@@ -8,17 +9,18 @@ import {
   Typography,
   IconButton,
   Checkbox,
-  Box,
 } from '@mui/material';
-import { Delete, Compare } from '@mui/icons-material';
+import { Delete, Compare, Crop } from '@mui/icons-material';
 import { ProgressImage } from '@/types';
 import { formatDate, formatDateShort } from '@/lib/dateUtils';
 import { formatFileSize } from '@/lib/imageUtils';
+import MeasurementsDisplay from './MeasurementsDisplay';
 
 interface ImageCardProps {
   image: ProgressImage;
   onDelete?: (id: string) => void;
   onSelect?: (id: string) => void;
+  onReCrop?: (image: ProgressImage) => void;
   selected?: boolean;
   selectable?: boolean;
   compact?: boolean;
@@ -28,10 +30,21 @@ export default function ImageCard({
   image,
   onDelete,
   onSelect,
+  onReCrop,
   selected = false,
   selectable = false,
   compact = false,
 }: ImageCardProps) {
+  const router = useRouter();
+
+  const handleCardClick = () => {
+    if (selectable) {
+      onSelect?.(image.id);
+    } else {
+      router.push(`/image/${image.id}`);
+    }
+  };
+
   return (
     <Card
       sx={{
@@ -39,11 +52,14 @@ export default function ImageCard({
         display: 'flex',
         flexDirection: 'column',
         position: 'relative',
-        cursor: selectable ? 'pointer' : 'default',
+        cursor: 'pointer',
         border: selected ? 2 : 0,
         borderColor: 'primary.main',
+        '&:hover': !compact ? {
+          boxShadow: 4,
+        } : {},
       }}
-      onClick={() => selectable && onSelect?.(image.id)}
+      onClick={handleCardClick}
     >
       {selectable && (
         <Checkbox
@@ -83,10 +99,25 @@ export default function ImageCard({
             {formatFileSize(image.fileSize)}
           </Typography>
         )}
+        {image.measurements && (
+          <MeasurementsDisplay measurements={image.measurements} compact={compact} />
+        )}
       </CardContent>
 
-      {(onDelete || onSelect) && !compact && (
+      {(onDelete || onSelect || onReCrop) && !compact && (
         <CardActions sx={{ justifyContent: 'flex-end', pt: 0 }}>
+          {onReCrop && image.originalImageData && (
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                onReCrop(image);
+              }}
+              title="Re-crop"
+            >
+              <Crop />
+            </IconButton>
+          )}
           {onSelect && !selectable && (
             <IconButton
               size="small"

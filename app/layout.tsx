@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Providers } from './providers';
+import NavigationHeader from '@/components/NavigationHeader';
 
 export const metadata: Metadata = {
   title: 'Weight Loss Tracker',
@@ -14,7 +15,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body style={{ margin: 0 }}>
-        <Providers>{children}</Providers>
+        <Providers>
+          <NavigationHeader />
+          {children}
+        </Providers>
       </body>
     </html>
   );

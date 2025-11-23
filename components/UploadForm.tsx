@@ -12,11 +12,14 @@ import {
   Alert,
   Stack,
 } from '@mui/material';
-import { CloudUpload, Check } from '@mui/icons-material';
-import { compressImage, validateImageType, getAcceptedTypes, generateImageId, formatFileSize } from '@/lib/imageUtils';
+import { CloudUpload, Check, Crop } from '@mui/icons-material';
+import { validateImageType, getAcceptedTypes, generateImageId, formatFileSize, compressImage } from '@/lib/imageUtils';
+import { compressCroppedImage, blobToDataURL, CropArea } from '@/lib/cropUtils';
 import { saveImage } from '@/lib/storage';
 import { getTodayDate } from '@/lib/dateUtils';
-import { ProgressImage } from '@/types';
+import { ProgressImage, BodyMeasurements, CropSettings } from '@/types';
+import MeasurementsInput from './MeasurementsInput';
+import ImageCropper from './ImageCropper';
 
 interface UploadFormProps {
   onUploadSuccess?: () => void;
@@ -24,8 +27,13 @@ interface UploadFormProps {
 
 export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [originalImage, setOriginalImage] = useState<string | null>(null);
+  const [croppedImage, setCroppedImage] = useState<Blob | null>(null);
+  const [croppedPreview, setCroppedPreview] = useState<string | null>(null);
+  const [showCropper, setShowCropper] = useState(false);
+  const [cropSettings, setCropSettings] = useState<CropSettings | null>(null);
   const [date, setDate] = useState(getTodayDate());
+  const [measurements, setMeasurements] = useState<BodyMeasurements>({});
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -49,19 +57,70 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
 
     const reader = new FileReader();
     reader.onload = (e) => {
-      setPreview(e.target?.result as string);
+      const imageData = e.target?.result as string;
+      setOriginalImage(imageData);
+      // Don't auto-open cropper - just show preview
+      setCroppedImage(null);
+      setCroppedPreview(null);
+      setCropSettings(null);
     };
     reader.readAsDataURL(file);
   };
 
+  const handleOpenCropper = () => {
+    if (originalImage) {
+      setShowCropper(true);
+    }
+  };
+
+  const handleCropComplete = async (croppedBlob: Blob, cropArea: CropArea) => {
+    setCroppedImage(croppedBlob);
+    const preview = await blobToDataURL(croppedBlob);
+    setCroppedPreview(preview);
+    setCropSettings({
+      x: cropArea.x,
+      y: cropArea.y,
+      width: cropArea.width,
+      height: cropArea.height,
+      zoom: 1,
+      aspectRatio: null,
+    });
+    setShowCropper(false);
+  };
+
+  const handleCropCancel = () => {
+    setShowCropper(false);
+  };
+
   const handleUpload = async () => {
-    if (!selectedFile || !preview) return;
+    if (!selectedFile) return;
 
     setIsUploading(true);
     setError(null);
 
     try {
-      const { data, mimeType, size } = await compressImage(selectedFile);
+      let data: string;
+      let size: number;
+      let mimeType: string;
+
+      if (croppedImage) {
+        // Use cropped image
+        const result = await compressCroppedImage(croppedImage);
+        data = result.data;
+        size = result.size;
+        mimeType = 'image/jpeg';
+      } else {
+        // Use original image without cropping
+        const result = await compressImage(selectedFile);
+        data = result.data;
+        size = result.size;
+        mimeType = result.mimeType;
+      }
+
+      // Filter out empty measurements
+      const filteredMeasurements = Object.fromEntries(
+        Object.entries(measurements).filter(([, v]) => v !== undefined && v !== null)
+      ) as BodyMeasurements;
 
       const image: ProgressImage = {
         id: generateImageId(),
@@ -71,6 +130,11 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
         mimeType,
         fileName: selectedFile.name,
         fileSize: size,
+        ...(Object.keys(filteredMeasurements).length > 0 && { measurements: filteredMeasurements }),
+        ...(croppedImage && {
+          originalImageData: originalImage || undefined,
+          cropSettings: cropSettings || undefined,
+        }),
       };
 
       await saveImage(image);
@@ -82,7 +146,11 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
 
       setSuccess(true);
       setSelectedFile(null);
-      setPreview(null);
+      setOriginalImage(null);
+      setCroppedImage(null);
+      setCroppedPreview(null);
+      setCropSettings(null);
+      setMeasurements({});
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -97,7 +165,11 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
 
   const handleReset = () => {
     setSelectedFile(null);
-    setPreview(null);
+    setOriginalImage(null);
+    setCroppedImage(null);
+    setCroppedPreview(null);
+    setCropSettings(null);
+    setMeasurements({});
     setError(null);
     setSuccess(false);
     setCompressionInfo(null);
@@ -140,6 +212,8 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
             }}
           />
 
+          <MeasurementsInput value={measurements} onChange={setMeasurements} />
+
           <Box>
             <input
               type="file"
@@ -161,14 +235,24 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
             </label>
           </Box>
 
-          {preview && (
+          {originalImage && (
             <Box>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                Preview:
-              </Typography>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                <Typography variant="body2" color="text.secondary">
+                  {croppedPreview ? 'Cropped Preview:' : 'Preview:'}
+                </Typography>
+                <Button
+                  size="small"
+                  startIcon={<Crop />}
+                  onClick={handleOpenCropper}
+                  variant="outlined"
+                >
+                  {croppedPreview ? 'Re-crop' : 'Crop'}
+                </Button>
+              </Stack>
               <Box
                 component="img"
-                src={preview}
+                src={croppedPreview || originalImage}
                 alt="Preview"
                 sx={{
                   width: '100%',
@@ -197,7 +281,7 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
             >
               {isUploading ? 'Uploading...' : 'Save Photo'}
             </Button>
-            {preview && (
+            {originalImage && (
               <Button variant="outlined" onClick={handleReset}>
                 Clear
               </Button>
@@ -205,6 +289,14 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
           </Stack>
         </Stack>
       </CardContent>
+
+      {showCropper && originalImage && (
+        <ImageCropper
+          imageSrc={originalImage}
+          onCropComplete={handleCropComplete}
+          onCancel={handleCropCancel}
+        />
+      )}
     </Card>
   );
 }

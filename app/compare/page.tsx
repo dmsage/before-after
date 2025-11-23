@@ -1,24 +1,19 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   Box,
   Container,
   Typography,
-  AppBar,
-  Toolbar,
-  IconButton,
   Button,
   Card,
   CardContent,
   Stack,
   Divider,
   Alert,
-  useColorScheme,
   Grid,
 } from '@mui/material';
-import { ArrowBack, DarkMode, LightMode, Clear } from '@mui/icons-material';
+import { Clear } from '@mui/icons-material';
 import { ProgressImage } from '@/types';
 import { getAllImages, getImage, findImageByDateOffset } from '@/lib/storage';
 import { sortByDate } from '@/lib/dateUtils';
@@ -27,11 +22,8 @@ import QuickCompare from '@/components/QuickCompare';
 import ImageCard from '@/components/ImageCard';
 
 export default function ComparePage() {
-  const router = useRouter();
-  const { mode, setMode } = useColorScheme();
   const [images, setImages] = useState<ProgressImage[]>([]);
-  const [selectedImage1, setSelectedImage1] = useState<ProgressImage | null>(null);
-  const [selectedImage2, setSelectedImage2] = useState<ProgressImage | null>(null);
+  const [selectedImages, setSelectedImages] = useState<(ProgressImage | null)[]>([null, null, null, null]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -46,7 +38,7 @@ export default function ComparePage() {
 
       // Auto-select newest as first image
       if (sorted.length > 0) {
-        setSelectedImage1(sorted[0]);
+        setSelectedImages([sorted[0], null, null, null]);
       }
     } catch (error) {
       console.error('Failed to load images:', error);
@@ -55,98 +47,91 @@ export default function ComparePage() {
     }
   };
 
-  const toggleColorMode = () => {
-    setMode(mode === 'light' ? 'dark' : 'light');
-  };
-
   const handleSelectImage = async (id: string) => {
     // Check if already selected - if so, deselect it
-    if (selectedImage1?.id === id) {
-      setSelectedImage1(selectedImage2);
-      setSelectedImage2(null);
-      return;
-    }
-    if (selectedImage2?.id === id) {
-      setSelectedImage2(null);
+    const existingIndex = selectedImages.findIndex(img => img?.id === id);
+    if (existingIndex !== -1) {
+      const newSelected = [...selectedImages];
+      newSelected[existingIndex] = null;
+      // Compact the array - move nulls to the end
+      const compacted: (ProgressImage | null)[] = newSelected.filter(img => img !== null);
+      while (compacted.length < 4) compacted.push(null);
+      setSelectedImages(compacted);
       return;
     }
 
-    // Not selected yet - add it
+    // Not selected yet - add it to first empty slot
     const image = await getImage(id);
     if (!image) return;
 
-    if (!selectedImage1) {
-      setSelectedImage1(image);
-    } else if (!selectedImage2) {
-      setSelectedImage2(image);
+    const firstEmptyIndex = selectedImages.findIndex(img => img === null);
+    if (firstEmptyIndex !== -1) {
+      const newSelected = [...selectedImages];
+      newSelected[firstEmptyIndex] = image;
+      setSelectedImages(newSelected);
     } else {
-      // Both slots full - replace the second one
-      setSelectedImage2(image);
+      // All slots full - replace the last one
+      const newSelected = [...selectedImages];
+      newSelected[3] = image;
+      setSelectedImages(newSelected);
     }
   };
 
   const handleQuickCompare = async (days: number) => {
-    if (!selectedImage1) return;
+    const firstImage = selectedImages[0];
+    if (!firstImage) return;
 
     const comparison = await findImageByDateOffset(
-      selectedImage1.date,
+      firstImage.date,
       days,
-      selectedImage1.id
+      firstImage.id
     );
 
     if (comparison) {
-      setSelectedImage2(comparison);
+      const newSelected = [...selectedImages];
+      newSelected[1] = comparison;
+      setSelectedImages(newSelected);
     }
   };
 
   const clearSelection = () => {
-    setSelectedImage1(null);
-    setSelectedImage2(null);
+    setSelectedImages([null, null, null, null]);
   };
 
-  const selectedIds = [
-    selectedImage1?.id,
-    selectedImage2?.id,
-  ].filter(Boolean) as string[];
+  const selectedIds = selectedImages
+    .filter((img): img is ProgressImage => img !== null)
+    .map(img => img.id);
+
+  const hasSelection = selectedImages.some(img => img !== null);
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-      <AppBar position="static" color="default" elevation={1}>
-        <Toolbar>
-          <IconButton edge="start" onClick={() => router.push('/')} sx={{ mr: 2 }}>
-            <ArrowBack />
-          </IconButton>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1, fontWeight: 'bold' }}>
-            Compare Photos
-          </Typography>
-          {(selectedImage1 || selectedImage2) && (
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<Clear />}
-              onClick={clearSelection}
-              sx={{ mr: 1 }}
-            >
-              Clear
-            </Button>
-          )}
-          <IconButton onClick={toggleColorMode} title="Toggle theme">
-            {mode === 'dark' ? <DarkMode /> : <LightMode />}
-          </IconButton>
-        </Toolbar>
-      </AppBar>
-
       <Container maxWidth="lg" sx={{ py: 4 }}>
         <Stack spacing={4}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Typography variant="h5" fontWeight="bold">
+              Compare Photos
+            </Typography>
+            {hasSelection && (
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<Clear />}
+                onClick={clearSelection}
+              >
+                Clear Selection
+              </Button>
+            )}
+          </Stack>
           {/* Comparison View */}
           <Card>
             <CardContent>
-              <ComparisonView image1={selectedImage1} image2={selectedImage2} />
+              <ComparisonView images={selectedImages} />
             </CardContent>
           </Card>
 
           {/* Quick Compare */}
-          {selectedImage1 && (
+          {selectedImages[0] && (
             <Card>
               <CardContent>
                 <QuickCompare

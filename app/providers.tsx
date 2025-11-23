@@ -1,8 +1,34 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, createContext, useContext } from 'react';
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
 import { useColorScheme } from '@mui/material/styles';
+
+interface ColorModeContextType {
+  toggleColorMode: () => void;
+  mode: 'light' | 'dark' | 'system';
+}
+
+const ColorModeContext = createContext<ColorModeContextType>({
+  toggleColorMode: () => {},
+  mode: 'system',
+});
+
+export const useColorMode = () => useContext(ColorModeContext);
+
+function ColorModeProvider({ children }: { children: ReactNode }) {
+  const { mode, setMode } = useColorScheme();
+
+  const toggleColorMode = () => {
+    setMode(mode === 'dark' ? 'light' : 'dark');
+  };
+
+  return (
+    <ColorModeContext.Provider value={{ toggleColorMode, mode: mode || 'system' }}>
+      {children}
+    </ColorModeContext.Provider>
+  );
+}
 
 declare module '@mui/material/styles' {
   interface Palette {
@@ -73,7 +99,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider theme={theme} defaultMode="system">
       <CssBaseline enableColorScheme />
-      {children}
+      <ColorModeProvider>{children}</ColorModeProvider>
     </ThemeProvider>
   );
 }

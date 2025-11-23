@@ -10,37 +10,23 @@ import {
   Card,
   CardContent,
   Stack,
-  AppBar,
-  Toolbar,
-  IconButton,
-  Snackbar,
-  Alert,
   Skeleton,
-  useColorScheme,
   Grid,
 } from '@mui/material';
 import {
   Add,
   PhotoLibrary,
   Compare,
-  DarkMode,
-  LightMode,
 } from '@mui/icons-material';
-import { getAllImages, exportData, importData } from '@/lib/storage';
+import { getAllImages } from '@/lib/storage';
 import { sortByDate, formatDate } from '@/lib/dateUtils';
-import { ProgressImage, SnackbarState } from '@/types';
+import { ProgressImage } from '@/types';
 import ImageCard from '@/components/ImageCard';
 
 export default function Home() {
   const router = useRouter();
-  const { mode, setMode } = useColorScheme();
   const [images, setImages] = useState<ProgressImage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [snackbar, setSnackbar] = useState<SnackbarState>({
-    open: false,
-    message: '',
-    severity: 'info',
-  });
 
   useEffect(() => {
     loadImages();
@@ -52,59 +38,9 @@ export default function Home() {
       setImages(sortByDate(allImages, 'newest'));
     } catch (error) {
       console.error('Failed to load images:', error);
-      showSnackbar('Failed to load images', 'error');
     } finally {
       setLoading(false);
     }
-  };
-
-  const showSnackbar = (message: string, severity: SnackbarState['severity']) => {
-    setSnackbar({ open: true, message, severity });
-  };
-
-  const handleExport = async () => {
-    try {
-      const data = await exportData();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `weight-tracker-backup-${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showSnackbar('Backup exported successfully', 'success');
-    } catch (error) {
-      console.error('Export failed:', error);
-      showSnackbar('Failed to export backup', 'error');
-    }
-  };
-
-  const handleImport = async () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-
-      try {
-        const text = await file.text();
-        const data = JSON.parse(text);
-        const count = await importData(data);
-        await loadImages();
-        showSnackbar(`Imported ${count} photos successfully`, 'success');
-      } catch (error) {
-        console.error('Import failed:', error);
-        showSnackbar('Failed to import backup. Please check the file format.', 'error');
-      }
-    };
-    input.click();
-  };
-
-  const toggleColorMode = () => {
-    setMode(mode === 'light' ? 'dark' : 'light');
   };
 
   const recentImages = images.slice(0, 4);
@@ -113,28 +49,6 @@ export default function Home() {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-      <AppBar position="static" color="default" elevation={1}>
-        <Toolbar>
-          <Typography
-            variant="h6"
-            component="div"
-            sx={{ flexGrow: 1, fontWeight: 'bold', cursor: 'pointer' }}
-            onClick={() => router.push('/')}
-          >
-            Weight Loss Tracker
-          </Typography>
-          <Button onClick={handleImport} size="small">
-            Import
-          </Button>
-          <Button onClick={handleExport} size="small" disabled={images.length === 0}>
-            Export
-          </Button>
-          <IconButton onClick={toggleColorMode} title="Toggle theme">
-            {mode === 'dark' ? <DarkMode /> : <LightMode />}
-          </IconButton>
-        </Toolbar>
-      </AppBar>
-
       <Container maxWidth="lg" sx={{ py: 4 }}>
         <Stack spacing={4}>
           {/* Quick Actions */}
@@ -238,19 +152,6 @@ export default function Home() {
           )}
         </Stack>
       </Container>
-
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={4000}
-        onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
-      >
-        <Alert
-          onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
-          severity={snackbar.severity}
-        >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
     </Box>
   );
 }
