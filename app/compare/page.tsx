@@ -21,14 +21,32 @@ import ComparisonView from '@/components/ComparisonView';
 import QuickCompare from '@/components/QuickCompare';
 import ImageCard from '@/components/ImageCard';
 
+const STORAGE_KEY = 'compare-selected-ids';
+
 export default function ComparePage() {
   const [images, setImages] = useState<ProgressImage[]>([]);
   const [selectedImages, setSelectedImages] = useState<(ProgressImage | null)[]>([null, null, null, null]);
   const [loading, setLoading] = useState(true);
+  const [initialized, setInitialized] = useState(false);
+
+  const selectedIds = selectedImages
+    .filter((img): img is ProgressImage => img !== null)
+    .map(img => img.id);
 
   useEffect(() => {
     loadImages();
   }, []);
+
+  // Persist selected image IDs to sessionStorage (only after initial load)
+  useEffect(() => {
+    if (!initialized) return;
+
+    if (selectedIds.length > 0) {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(selectedIds));
+    } else {
+      sessionStorage.removeItem(STORAGE_KEY);
+    }
+  }, [selectedIds, initialized]);
 
   const loadImages = async () => {
     try {
@@ -36,7 +54,21 @@ export default function ComparePage() {
       const sorted = sortByDate(allImages, 'newest');
       setImages(sorted);
 
-      // Auto-select newest as first image
+      // Try to restore selection from sessionStorage
+      const savedIds = sessionStorage.getItem(STORAGE_KEY);
+      if (savedIds) {
+        const ids: string[] = JSON.parse(savedIds);
+        const restored: (ProgressImage | null)[] = ids.map(id =>
+          sorted.find(img => img.id === id) || null
+        );
+        while (restored.length < 4) restored.push(null);
+        if (restored.some(img => img !== null)) {
+          setSelectedImages(restored);
+          return;
+        }
+      }
+
+      // Fallback: auto-select newest as first image
       if (sorted.length > 0) {
         setSelectedImages([sorted[0], null, null, null]);
       }
@@ -44,6 +76,7 @@ export default function ComparePage() {
       console.error('Failed to load images:', error);
     } finally {
       setLoading(false);
+      setInitialized(true);
     }
   };
 
@@ -98,11 +131,7 @@ export default function ComparePage() {
     setSelectedImages([null, null, null, null]);
   };
 
-  const selectedIds = selectedImages
-    .filter((img): img is ProgressImage => img !== null)
-    .map(img => img.id);
-
-  const hasSelection = selectedImages.some(img => img !== null);
+  const hasSelection = selectedIds.length > 0;
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>

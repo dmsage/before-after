@@ -11,8 +11,9 @@ import {
   CircularProgress,
   Alert,
   Stack,
+  IconButton,
 } from '@mui/material';
-import { CloudUpload, Check, Crop } from '@mui/icons-material';
+import { CloudUpload, Check, Crop, Close } from '@mui/icons-material';
 import { validateImageType, getAcceptedTypes, generateImageId, formatFileSize, compressImage, isHeicFile, convertHeicToJpeg } from '@/lib/imageUtils';
 import { compressCroppedImage, blobToDataURL, CropArea } from '@/lib/cropUtils';
 import { saveImage } from '@/lib/storage';
@@ -25,9 +26,13 @@ interface UploadFormProps {
   onUploadSuccess?: () => void;
 }
 
+interface PendingFile {
+  file: File;
+  preview: string;
+}
+
 export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [originalImage, setOriginalImage] = useState<string | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [croppedImage, setCroppedImage] = useState<Blob | null>(null);
   const [croppedPreview, setCroppedPreview] = useState<string | null>(null);
   const [showCropper, setShowCropper] = useState(false);
@@ -37,57 +42,77 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [compressionInfo, setCompressionInfo] = useState<{ original: number; compressed: number } | null>(null);
+  const [uploadCount, setUploadCount] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const processFile = async (file: File) => {
+  const processFiles = async (files: File[]) => {
     setError(null);
     setSuccess(false);
-    setCompressionInfo(null);
+    setUploadCount(0);
 
-    if (!validateImageType(file)) {
-      setError('Please select a valid image file (JPG, PNG, WebP, or HEIC)');
-      return;
-    }
+    const validFiles: File[] = [];
+    const invalidFiles: string[] = [];
 
-    let processedFile = file;
-
-    // Convert HEIC to JPEG if needed
-    if (isHeicFile(file)) {
-      setIsConverting(true);
-      try {
-        const jpegBlob = await convertHeicToJpeg(file);
-        // Create a new File from the blob
-        processedFile = new File([jpegBlob], file.name.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg'), {
-          type: 'image/jpeg',
-        });
-      } catch (err) {
-        setError('Failed to convert HEIC image. Please try a different format.');
-        setIsConverting(false);
-        return;
+    for (const file of files) {
+      if (validateImageType(file)) {
+        validFiles.push(file);
+      } else {
+        invalidFiles.push(file.name);
       }
-      setIsConverting(false);
     }
 
-    setSelectedFile(processedFile);
+    if (invalidFiles.length > 0) {
+      setError(`Invalid file type(s): ${invalidFiles.join(', ')}. Accepted: JPG, PNG, WebP, HEIC`);
+    }
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const imageData = e.target?.result as string;
-      setOriginalImage(imageData);
-      setCroppedImage(null);
-      setCroppedPreview(null);
-      setCropSettings(null);
-    };
-    reader.readAsDataURL(processedFile);
+    if (validFiles.length === 0) return;
+
+    setIsConverting(true);
+    const newPendingFiles: PendingFile[] = [];
+
+    for (const file of validFiles) {
+      let processedFile = file;
+
+      // Convert HEIC to JPEG if needed
+      if (isHeicFile(file)) {
+        try {
+          const jpegBlob = await convertHeicToJpeg(file);
+          processedFile = new File(
+            [jpegBlob],
+            file.name.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg'),
+            { type: 'image/jpeg' }
+          );
+        } catch (err) {
+          setError(`Failed to convert ${file.name}. Skipping.`);
+          continue;
+        }
+      }
+
+      // Read file as data URL for preview
+      const preview = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.readAsDataURL(processedFile);
+      });
+
+      newPendingFiles.push({ file: processedFile, preview });
+    }
+
+    setIsConverting(false);
+    setPendingFiles((prev) => [...prev, ...newPendingFiles]);
+
+    // Reset cropping state when adding new files
+    setCroppedImage(null);
+    setCroppedPreview(null);
+    setCropSettings(null);
   };
 
   const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      processFile(file);
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      processFiles(Array.from(files));
     }
   };
 
@@ -113,14 +138,18 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
     e.stopPropagation();
     setIsDragging(false);
 
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      processFile(file);
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      processFiles(Array.from(files));
     }
   };
 
+  const removeFile = (index: number) => {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleOpenCropper = () => {
-    if (originalImage) {
+    if (pendingFiles.length === 1) {
       setShowCropper(true);
     }
   };
@@ -145,60 +174,64 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
   };
 
   const handleUpload = async () => {
-    if (!selectedFile) return;
+    if (pendingFiles.length === 0) return;
 
     setIsUploading(true);
     setError(null);
+    setUploadCount(0);
 
     try {
-      let data: string;
-      let size: number;
-      let mimeType: string;
-
-      if (croppedImage) {
-        // Use cropped image
-        const result = await compressCroppedImage(croppedImage);
-        data = result.data;
-        size = result.size;
-        mimeType = 'image/jpeg';
-      } else {
-        // Use original image without cropping
-        const result = await compressImage(selectedFile);
-        data = result.data;
-        size = result.size;
-        mimeType = result.mimeType;
-      }
-
       // Filter out empty measurements
       const filteredMeasurements = Object.fromEntries(
         Object.entries(measurements).filter(([, v]) => v !== undefined && v !== null)
       ) as BodyMeasurements;
 
-      const image: ProgressImage = {
-        id: generateImageId(),
-        imageData: data,
-        date,
-        uploadTimestamp: Date.now(),
-        mimeType,
-        fileName: selectedFile.name,
-        fileSize: size,
-        ...(Object.keys(filteredMeasurements).length > 0 && { measurements: filteredMeasurements }),
-        ...(croppedImage && {
-          originalImageData: originalImage || undefined,
-          cropSettings: cropSettings || undefined,
-        }),
-      };
+      let successCount = 0;
 
-      await saveImage(image);
+      for (let i = 0; i < pendingFiles.length; i++) {
+        const { file, preview } = pendingFiles[i];
 
-      setCompressionInfo({
-        original: selectedFile.size,
-        compressed: size,
-      });
+        let data: string;
+        let size: number;
+        let mimeType: string;
+
+        // For single file with crop, use cropped image
+        if (pendingFiles.length === 1 && croppedImage) {
+          const result = await compressCroppedImage(croppedImage);
+          data = result.data;
+          size = result.size;
+          mimeType = 'image/jpeg';
+        } else {
+          // Use original image without cropping
+          const result = await compressImage(file);
+          data = result.data;
+          size = result.size;
+          mimeType = result.mimeType;
+        }
+
+        const image: ProgressImage = {
+          id: generateImageId(),
+          imageData: data,
+          date,
+          uploadTimestamp: Date.now() + i, // Ensure unique timestamps
+          mimeType,
+          fileName: file.name,
+          fileSize: size,
+          // Only apply measurements to first image if multiple
+          ...(i === 0 && Object.keys(filteredMeasurements).length > 0 && { measurements: filteredMeasurements }),
+          ...(pendingFiles.length === 1 && croppedImage && {
+            originalImageData: preview,
+            cropSettings: cropSettings || undefined,
+          }),
+        };
+
+        await saveImage(image);
+        successCount++;
+        setUploadCount(successCount);
+      }
 
       setSuccess(true);
-      setSelectedFile(null);
-      setOriginalImage(null);
+      setPendingFiles([]);
       setCroppedImage(null);
       setCroppedPreview(null);
       setCropSettings(null);
@@ -209,22 +242,21 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
 
       onUploadSuccess?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to upload image');
+      setError(err instanceof Error ? err.message : 'Failed to upload images');
     } finally {
       setIsUploading(false);
     }
   };
 
   const handleReset = () => {
-    setSelectedFile(null);
-    setOriginalImage(null);
+    setPendingFiles([]);
     setCroppedImage(null);
     setCroppedPreview(null);
     setCropSettings(null);
     setMeasurements({});
     setError(null);
     setSuccess(false);
-    setCompressionInfo(null);
+    setUploadCount(0);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -244,12 +276,7 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
 
           {success && (
             <Alert severity="success" onClose={() => setSuccess(false)}>
-              Photo uploaded successfully!
-              {compressionInfo && (
-                <Typography variant="body2" sx={{ mt: 1 }}>
-                  Compressed from {formatFileSize(compressionInfo.original)} to {formatFileSize(compressionInfo.compressed)}
-                </Typography>
-              )}
+              {uploadCount === 1 ? 'Photo uploaded successfully!' : `${uploadCount} photos uploaded successfully!`}
             </Alert>
           )}
 
@@ -294,19 +321,20 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
               ref={fileInputRef}
               style={{ display: 'none' }}
               id="image-upload"
+              multiple
             />
             {isConverting ? (
               <>
                 <CircularProgress size={48} sx={{ mb: 1 }} />
                 <Typography variant="body1" color="primary.main">
-                  Converting HEIC image...
+                  Processing images...
                 </Typography>
               </>
             ) : (
               <>
                 <CloudUpload sx={{ fontSize: 48, color: isDragging ? 'primary.main' : 'text.secondary', mb: 1 }} />
                 <Typography variant="body1" color={isDragging ? 'primary.main' : 'text.secondary'}>
-                  {isDragging ? 'Drop image here' : 'Drag & drop an image here'}
+                  {isDragging ? 'Drop images here' : 'Drag & drop images here'}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                   or click to select (JPG, PNG, WebP, HEIC)
@@ -315,38 +343,112 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
             )}
           </Box>
 
-          {originalImage && (
+          {pendingFiles.length > 0 && (
             <Box>
               <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
                 <Typography variant="body2" color="text.secondary">
-                  {croppedPreview ? 'Cropped Preview:' : 'Preview:'}
+                  {pendingFiles.length === 1
+                    ? croppedPreview ? 'Cropped Preview:' : 'Preview:'
+                    : `${pendingFiles.length} photos selected:`}
                 </Typography>
-                <Button
-                  size="small"
-                  startIcon={<Crop />}
-                  onClick={handleOpenCropper}
-                  variant="outlined"
-                >
-                  {croppedPreview ? 'Re-crop' : 'Crop'}
-                </Button>
+                {pendingFiles.length === 1 && (
+                  <Button
+                    size="small"
+                    startIcon={<Crop />}
+                    onClick={handleOpenCropper}
+                    variant="outlined"
+                  >
+                    {croppedPreview ? 'Re-crop' : 'Crop'}
+                  </Button>
+                )}
               </Stack>
-              <Box
-                component="img"
-                src={croppedPreview || originalImage}
-                alt="Preview"
-                sx={{
-                  width: '100%',
-                  maxHeight: 400,
-                  objectFit: 'contain',
-                  borderRadius: 1,
-                  border: '1px solid',
-                  borderColor: 'divider',
-                }}
-              />
-              {selectedFile && (
-                <Typography variant="caption" color="text.secondary">
-                  {selectedFile.name} ({formatFileSize(selectedFile.size)})
-                </Typography>
+              {pendingFiles.length === 1 ? (
+                <Box>
+                  <Box
+                    component="img"
+                    src={croppedPreview || pendingFiles[0].preview}
+                    alt="Preview"
+                    sx={{
+                      width: '100%',
+                      maxHeight: 400,
+                      objectFit: 'contain',
+                      borderRadius: 1,
+                      border: '1px solid',
+                      borderColor: 'divider',
+                    }}
+                  />
+                  <Typography variant="caption" color="text.secondary">
+                    {pendingFiles[0].file.name} ({formatFileSize(pendingFiles[0].file.size)})
+                  </Typography>
+                </Box>
+              ) : (
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+                    gap: 1,
+                  }}
+                >
+                  {pendingFiles.map((pf, index) => (
+                    <Box
+                      key={index}
+                      sx={{
+                        position: 'relative',
+                        aspectRatio: '1',
+                        borderRadius: 1,
+                        overflow: 'hidden',
+                        border: '1px solid',
+                        borderColor: 'divider',
+                      }}
+                    >
+                      <Box
+                        component="img"
+                        src={pf.preview}
+                        alt={`Preview ${index + 1}`}
+                        sx={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                        }}
+                      />
+                      <IconButton
+                        size="small"
+                        onClick={() => removeFile(index)}
+                        sx={{
+                          position: 'absolute',
+                          top: 2,
+                          right: 2,
+                          bgcolor: 'rgba(0,0,0,0.5)',
+                          color: 'white',
+                          '&:hover': {
+                            bgcolor: 'rgba(0,0,0,0.7)',
+                          },
+                          padding: 0.5,
+                        }}
+                      >
+                        <Close fontSize="small" />
+                      </IconButton>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          position: 'absolute',
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          bgcolor: 'rgba(0,0,0,0.5)',
+                          color: 'white',
+                          px: 0.5,
+                          py: 0.25,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {pf.file.name}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Box>
               )}
             </Box>
           )}
@@ -355,13 +457,17 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
             <Button
               variant="contained"
               onClick={handleUpload}
-              disabled={!selectedFile || isUploading}
+              disabled={pendingFiles.length === 0 || isUploading}
               startIcon={isUploading ? <CircularProgress size={20} /> : <Check />}
               fullWidth
             >
-              {isUploading ? 'Uploading...' : 'Save Photo'}
+              {isUploading
+                ? `Uploading${uploadCount > 0 ? ` (${uploadCount}/${pendingFiles.length})` : '...'}`
+                : pendingFiles.length <= 1
+                  ? 'Save Photo'
+                  : `Save ${pendingFiles.length} Photos`}
             </Button>
-            {originalImage && (
+            {pendingFiles.length > 0 && (
               <Button variant="outlined" onClick={handleReset}>
                 Clear
               </Button>
@@ -370,9 +476,9 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
         </Stack>
       </CardContent>
 
-      {showCropper && originalImage && (
+      {showCropper && pendingFiles.length === 1 && (
         <ImageCropper
-          imageSrc={originalImage}
+          imageSrc={pendingFiles[0].preview}
           onCropComplete={handleCropComplete}
           onCancel={handleCropCancel}
         />

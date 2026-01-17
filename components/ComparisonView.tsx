@@ -238,7 +238,7 @@ export default function ComparisonView({ images }: ComparisonViewProps) {
   // Determine grid layout based on number of images
   const getGridSize = () => {
     if (activeImages.length <= 2) {
-      return { xs: 12, sm: 6 };
+      return { xs: 6, sm: 6 };
     }
     return { xs: 6, sm: 6, md: 3 };
   };

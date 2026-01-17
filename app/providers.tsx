@@ -92,6 +92,18 @@ const theme = createTheme({
         },
       },
     },
+    MuiCardContent: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          [theme.breakpoints.down('sm')]: {
+            padding: 0,
+            '&:last-child': {
+              paddingBottom: 0,
+            },
+          },
+        }),
+      },
+    },
   },
 });
 
